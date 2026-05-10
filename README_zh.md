@@ -176,7 +176,7 @@ flowchart LR
 
 - Demo 页面：Coming Soon
 - arXiv 论文：[Khala: Scaling Acoustic Token Language Models Toward High-Fidelity Music Generation](https://arxiv.org/abs/2605.01790)
-- 模型权重：`https://huggingface.co/liujiafeng/Khala-MusicGeneration-v1.0`
+- 模型权重：https://huggingface.co/liujiafeng/Khala-MusicGeneration-v1.0
 - 环境配置：[ENVIRONMENT_SETUP_zh.md](./ENVIRONMENT_SETUP_zh.md)
 - 后端说明：[backend/README_backend_zh.md](./backend/README_backend_zh.md)
 
