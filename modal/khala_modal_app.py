@@ -47,8 +47,9 @@ image = (
     modal.Image.from_registry("ghcr.io/davidliujiafeng/khala-env:ngc25.02-node24")
     .apt_install("ffmpeg", "git", "curl")
     .pip_install("huggingface_hub[hf_transfer]", "requests")
-    .add_local_dir(".", remote_path=str(REPO_DIR), ignore=[".git", "checkpoints", "backend/generated_audio", "frontend/node_modules"])
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1", "PYTHONUNBUFFERED": "1"})
+    # Keep local files last: Modal disallows later image build steps after add_local_*.
+    .add_local_dir(".", remote_path=str(REPO_DIR), ignore=[".git", "checkpoints", "backend/generated_audio", "frontend/node_modules"])
 )
 
 app = modal.App(APP_NAME, image=image)
