@@ -134,7 +134,20 @@ def _stop_backend(proc: Optional[subprocess.Popen]) -> None:
             pass
 
 
-def _generate_once(prompt: str, lyrics: str, duration: int, mode: str, prompt_mode: str, top_k_bb: int, temperature: float) -> pathlib.Path:
+def _generate_once(
+    prompt: str,
+    lyrics: str,
+    duration: int,
+    mode: str,
+    prompt_mode: str,
+    top_k_bb: int,
+    top_k_sr: int,
+    temperature: float,
+    genre: str,
+    language: str,
+    superres_text_mode: str,
+    seed: int,
+) -> pathlib.Path:
     _ensure_checkpoints()
     proc: Optional[subprocess.Popen] = None
     try:
@@ -147,7 +160,12 @@ def _generate_once(prompt: str, lyrics: str, duration: int, mode: str, prompt_mo
             "lyrics": lyrics,
             "duration": duration,
             "top_k_bb": top_k_bb,
+            "top_k_sr": top_k_sr,
             "temperature": temperature,
+            "genre": genre,
+            "language": language,
+            "superres_text_mode": superres_text_mode,
+            "seed_override": seed,
         }
         print("[khala-modal] submit", json.dumps({**payload, "lyrics": lyrics[:120] + ("..." if len(lyrics) > 120 else "")}, ensure_ascii=False))
         accepted = _http_json("/generate", payload, timeout=60)
@@ -184,9 +202,35 @@ def _generate_once(prompt: str, lyrics: str, duration: int, mode: str, prompt_mo
     timeout=7200,
     volumes={str(CHECKPOINTS_DIR): checkpoints, str(OUTPUTS_DIR): outputs},
 )
-def generate(prompt: str, lyrics: str = "", duration: int = 1, mode: str = "vocal", prompt_mode: str = "natural", top_k_bb: int = 80, temperature: float = 1.0) -> bytes:
+def generate(
+    prompt: str,
+    lyrics: str = "",
+    duration: int = 1,
+    mode: str = "vocal",
+    prompt_mode: str = "natural",
+    top_k_bb: int = 80,
+    top_k_sr: int = 10,
+    temperature: float = 1.0,
+    genre: str = "Electronic",
+    language: str = "English",
+    superres_text_mode: str = "same_as_backbone_no_description",
+    seed: int = 0,
+) -> bytes:
     """Generate a Khala MP3 and return its bytes."""
-    out = _generate_once(prompt, lyrics, duration, mode, prompt_mode, top_k_bb, temperature)
+    out = _generate_once(
+        prompt,
+        lyrics,
+        duration,
+        mode,
+        prompt_mode,
+        top_k_bb,
+        top_k_sr,
+        temperature,
+        genre,
+        language,
+        superres_text_mode,
+        seed,
+    )
     return out.read_bytes()
 
 
@@ -204,8 +248,26 @@ def generate_endpoint(item: dict) -> dict:
     mode = item.get("mode", "vocal")
     prompt_mode = item.get("prompt_mode", "natural")
     top_k_bb = int(item.get("top_k_bb", 80))
+    top_k_sr = int(item.get("top_k_sr", 10))
     temperature = float(item.get("temperature", 1.0))
-    out = _generate_once(prompt, lyrics, duration, mode, prompt_mode, top_k_bb, temperature)
+    genre = item.get("genre", "Electronic")
+    language = item.get("language", "English")
+    superres_text_mode = item.get("superres_text_mode", "same_as_backbone_no_description")
+    seed = int(item.get("seed", 0))
+    out = _generate_once(
+        prompt,
+        lyrics,
+        duration,
+        mode,
+        prompt_mode,
+        top_k_bb,
+        top_k_sr,
+        temperature,
+        genre,
+        language,
+        superres_text_mode,
+        seed,
+    )
     return {"ok": True, "modal_volume": "khala-outputs", "path": str(out), "bytes": out.stat().st_size}
 
 
@@ -218,12 +280,30 @@ def generate_cli(
     mode: str = "vocal",
     prompt_mode: str = "natural",
     top_k_bb: int = 80,
+    top_k_sr: int = 10,
     temperature: float = 1.0,
+    genre: str = "Electronic",
+    language: str = "English",
+    superres_text_mode: str = "same_as_backbone_no_description",
+    seed: int = 0,
     out: str = "/tmp/khala_sample.mp3",
 ):
     if lyrics_file:
         lyrics = pathlib.Path(lyrics_file).read_text(encoding="utf-8")
-    audio = generate.remote(prompt, lyrics, duration, mode, prompt_mode, top_k_bb, temperature)
+    audio = generate.remote(
+        prompt,
+        lyrics,
+        duration,
+        mode,
+        prompt_mode,
+        top_k_bb,
+        top_k_sr,
+        temperature,
+        genre,
+        language,
+        superres_text_mode,
+        seed,
+    )
     pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
     pathlib.Path(out).write_bytes(audio)
     print(out)

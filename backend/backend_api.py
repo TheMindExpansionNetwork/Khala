@@ -179,13 +179,13 @@ class TrackResult:
 class Job:
     """One frontend generation request tracked by the dispatcher."""
 
-    def __init__(self, job_id: str, params: dict):
+    def __init__(self, job_id: str, params: dict, num_tracks: int = NUM_TRACKS_PER_JOB):
         self.job_id = job_id
-        self.num_tracks = NUM_TRACKS_PER_JOB
+        self.num_tracks = max(1, min(NUM_TRACKS_PER_JOB, int(num_tracks)))
         self.params = params
         self.created_at = time.time()
         self.cleaned_lyrics = ""
-        self.tracks: List[TrackResult] = [TrackResult() for _ in range(NUM_TRACKS_PER_JOB)]
+        self.tracks: List[TrackResult] = [TrackResult() for _ in range(self.num_tracks)]
         self.queue_position = 0       # 0 = not queued / dispatched
         self._dispatched = False
 
@@ -463,7 +463,8 @@ async def _dispatch_to_worker(
 
     try:
         request_params = dict(params)
-        request_params["seed_override"] = int(worker.seed) + int(seed_offset)
+        base_seed = int(request_params.get("seed_override") or worker.seed)
+        request_params["seed_override"] = base_seed + int(seed_offset)
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=10.0)) as client:
             r = await client.post(f"{worker.url}/generate", json=request_params)
             result = r.json()
@@ -521,12 +522,13 @@ def _reset_worker_runtime_state(worker: WorkerInfo) -> None:
 # ============================================================
 
 
-def clamp_generate_request(req: "GenerateRequest") -> tuple[int, int, float]:
+def clamp_generate_request(req: "GenerateRequest") -> tuple[int, int, int, float]:
     """Clamp frontend request controls into a safe range."""
     duration = max(1, min(10, req.duration))
     top_k_bb = max(1, min(200, req.top_k_bb))
+    top_k_sr = max(1, min(200, req.top_k_sr))
     temperature = max(0.6, min(1.4, req.temperature))
-    return duration, top_k_bb, temperature
+    return duration, top_k_bb, top_k_sr, temperature
 
 
 def extract_user_input(req: "GenerateRequest") -> tuple[str, str]:
@@ -548,12 +550,13 @@ def build_worker_params(
     meta_description: str,
     duration: int,
     top_k_bb: int,
+    top_k_sr: int,
     temperature: float,
     ) -> dict:
     """Convert frontend request fields into the worker payload."""
     return {
-        "genre": meta_genre,
-        "language": meta_language,
+        "genre": meta_genre or req.genre,
+        "language": meta_language or req.language,
         "tags": meta_tags,
         "description": meta_description,
         "duration": duration,
@@ -561,12 +564,14 @@ def build_worker_params(
         "backbone_name": "",
         "superres_name": "",
         "top_k_bb": top_k_bb,
-        "top_k_sr": 10,
+        "top_k_sr": top_k_sr,
         "temperature": temperature,
-        "superres_text_mode": effective_mode,
+        "superres_text_mode": req.superres_text_mode or effective_mode,
         "raw_user_input": user_input,
         "raw_mode": req.mode,
         "raw_prompt_mode": req.prompt_mode,
+        "seed_override": int(req.seed_override),
+        "num_tracks": int(req.num_tracks),
     }
 
 
@@ -602,7 +607,7 @@ async def resolve_generation_metadata(
 def create_job(params: dict, cleaned_lyrics: str) -> Job:
     """Create and register a new dispatcher job."""
     job_id = str(uuid.uuid4())[:12]
-    job = Job(job_id=job_id, params=params)
+    job = Job(job_id=job_id, params=params, num_tracks=int(params.pop("num_tracks", NUM_TRACKS_PER_JOB)))
     job.cleaned_lyrics = cleaned_lyrics
     JOBS[job_id] = job
     return job
@@ -638,7 +643,13 @@ class GenerateRequest(BaseModel):
     lyrics: str = ""
     duration: int = 3                # minutes 1-10
     top_k_bb: int = 80               # backbone top-k (user adjustable)
+    top_k_sr: int = 10               # super-resolution top-k (user adjustable)
     temperature: float = 1.0         # backbone temperature (user adjustable)
+    genre: str = "Electronic"
+    language: str = "English"
+    superres_text_mode: str = SUPERRES_TEXT_MODE
+    seed_override: int = 0
+    num_tracks: int = 1
 
 
 def get_job_or_error(job_id: str) -> Optional[Job]:
@@ -687,7 +698,7 @@ def get_tags():
 async def generate(req: GenerateRequest):
     """Normalize a frontend request, create a job, then dispatch or enqueue it."""
     print(f"[API] POST /generate  body={req.model_dump()}")
-    duration, top_k_bb, temperature = clamp_generate_request(req)
+    duration, top_k_bb, top_k_sr, temperature = clamp_generate_request(req)
     cleaned_lyrics, user_input = extract_user_input(req)
     (
         effective_mode,
@@ -711,6 +722,7 @@ async def generate(req: GenerateRequest):
         meta_description=meta_description,
         duration=duration,
         top_k_bb=top_k_bb,
+        top_k_sr=top_k_sr,
         temperature=temperature,
     )
     job = create_job(worker_params, cleaned_lyrics)
