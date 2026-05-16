@@ -80,10 +80,13 @@ def _ensure_checkpoints() -> None:
         print("[khala-modal] checkpoints already present")
         return
     print(f"[khala-modal] downloading {MODEL_REPO} to {CHECKPOINTS_DIR}")
-    subprocess.run(
-        ["hf", "download", MODEL_REPO, "--local-dir", str(CHECKPOINTS_DIR)],
-        check=True,
-        cwd=str(REPO_DIR),
+    # Use the Python API instead of the `hf` CLI because some NGC images carry
+    # an older Typer that can break the CLI entrypoint.
+    from huggingface_hub import snapshot_download
+
+    snapshot_download(
+        repo_id=MODEL_REPO,
+        local_dir=str(CHECKPOINTS_DIR),
     )
     marker.write_text(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()) + "\n")
     checkpoints.commit()
